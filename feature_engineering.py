@@ -5,6 +5,7 @@ Uses parallel processing with 17 cores
 """
 
 import json
+import os
 import pandas as pd
 import numpy as np
 from multiprocessing import Pool
@@ -13,6 +14,39 @@ import warnings
 warnings.filterwarnings('ignore')
 
 N_JOBS = 17
+
+# ============================================================================
+# FEATURE FLAGS (Ablation toggles)
+# Load from feature_flags.json if present; otherwise enable all
+# ============================================================================
+DEFAULT_FEATURE_FLAGS = {
+    "early_advantage": True,
+    "early_status": True,
+    "hp_ahead_share": True,
+    "extremes": True,
+    "hp_slopes": True,
+    "hp_area": True,
+    "stab": True,
+    "initiative": True,
+    "speed_edge_plus": True,
+    "team_type_max": True,
+    "first_status": True,
+    "immobilized": True,
+    "switch_faints": True,
+    "move_mix": True,
+    "type_enhance": True,
+}
+
+FEATURE_FLAGS = DEFAULT_FEATURE_FLAGS.copy()
+try:
+    if os.path.exists('feature_flags.json'):
+        with open('feature_flags.json', 'r') as f:
+            loaded = json.load(f)
+            if isinstance(loaded, dict):
+                FEATURE_FLAGS.update({k: bool(v) for k, v in loaded.items() if k in FEATURE_FLAGS})
+except Exception:
+    # Fall back to defaults silently
+    pass
 
 # ============================================================================
 # TYPE EFFECTIVENESS CHART (Pokemon Gen 1)
@@ -99,6 +133,10 @@ def extract_features(battle):
         features['speed_advantage'] = p1_lead['base_spe'] - p2_lead['base_spe']
         features['speed_advantage_binary'] = 1 if features['speed_advantage'] > 0 else 0
         features['speed_tier'] = sum([p['base_spe'] > p2_lead['base_spe'] for p in p1_team])
+        if FEATURE_FLAGS.get('speed_edge_plus', True):
+            features['max_speed_edge'] = max([p['base_spe'] - p2_lead['base_spe'] for p in p1_team])
+            features['speed_tier_10'] = sum([p['base_spe'] - p2_lead['base_spe'] > 10 for p in p1_team])
+            features['speed_tier_20'] = sum([p['base_spe'] - p2_lead['base_spe'] > 20 for p in p1_team])
         
         # ===== TYPE COVERAGE =====
         p1_types = [t for p in p1_team for t in p['types'] if t != 'notype']
@@ -113,6 +151,13 @@ def extract_features(battle):
         for p1_type in p1_lead_types:
             type_advantages.append(get_type_effectiveness(p1_type, p2_lead_types))
         features['p1_lead_type_advantage'] = max(type_advantages) if type_advantages else 1.0
+        if FEATURE_FLAGS.get('team_type_max', True):
+            # Best team type multiplier vs P2 lead across all team types
+            team_all_types = [t for p in p1_team for t in p.get('types', []) if t and t != 'notype']
+            team_max_mult = 1.0
+            for t in team_all_types:
+                team_max_mult = max(team_max_mult, get_type_effectiveness(t, p2_lead_types))
+            features['team_max_type_mult'] = team_max_mult
         
         # ===== BATTLE TIMELINE FEATURES (THE GOLD MINE!) =====
         if len(timeline) > 0:
@@ -136,6 +181,28 @@ def extract_features(battle):
             # Who moved first turn 1 (speed check)
             p1_moved_first = turn1.get('p1_move_details') is not None and turn1.get('p2_move_details') is None
             features['p1_moved_first'] = 1 if p1_moved_first else 0
+            if FEATURE_FLAGS.get('initiative', True):
+                # Initiative over first 3 and 5 turns (approximation based on presence/absence)
+                p1_first_t3 = 0
+                p2_first_t3 = 0
+                p1_first_t5 = 0
+                p2_first_t5 = 0
+                upto = min(5, len(timeline))
+                for i in range(upto):
+                    t = timeline[i]
+                    p1m = t.get('p1_move_details')
+                    p2m = t.get('p2_move_details')
+                    if p1m is not None and p2m is None:
+                        if i < 3:
+                            p1_first_t3 += 1
+                        p1_first_t5 += 1
+                    if p2m is not None and p1m is None:
+                        if i < 3:
+                            p2_first_t3 += 1
+                        p2_first_t5 += 1
+                features['p1_moved_first_t3'] = p1_first_t3
+                features['p1_moved_first_t5'] = p1_first_t5
+                features['initiative_net_t5'] = p1_first_t5 - p2_first_t5
             
         # Early game momentum (turns 3, 5, 10)
         for turn_num in [2, 4, 9]:  # Index 2, 4, 9 = Turn 3, 5, 10
@@ -169,6 +236,241 @@ def extract_features(battle):
         for status in p1_status_counts:
             features[f'p1_turns_{status}'] = p1_status_counts[status]
         
+        # ===== Additional timeline-derived features (controlled by FEATURE_FLAGS) =====
+        # Build per-turn arrays
+        p1_hp_series = []
+        p2_hp_series = []
+        p1_status_series = []
+        p2_status_series = []
+        p1_moves = []  # tuples: (category, base_power, priority)
+        p2_moves = []
+        p1_names = []
+        p2_names = []
+        for t in timeline:
+            p1s = t.get('p1_pokemon_state', {})
+            p2s = t.get('p2_pokemon_state', {})
+            p1_hp_series.append(p1s.get('hp_pct', 0) or 0)
+            p2_hp_series.append(p2s.get('hp_pct', 0) or 0)
+            p1_status_series.append(p1s.get('status', 'nostatus') or 'nostatus')
+            p2_status_series.append(p2s.get('status', 'nostatus') or 'nostatus')
+            p1_names.append(p1s.get('name', '') or '')
+            p2_names.append(p2s.get('name', '') or '')
+            m1 = t.get('p1_move_details') or {}
+            m2 = t.get('p2_move_details') or {}
+            p1_moves.append((m1.get('category'), m1.get('base_power', 0) or 0, m1.get('priority', 0) or 0))
+            p2_moves.append((m2.get('category'), m2.get('base_power', 0) or 0, m2.get('priority', 0) or 0))
+
+        # STAB usage (Same-Type Attack Bonus) - reliable for P1 (we know team types)
+        if FEATURE_FLAGS.get('stab', True):
+            name_to_types = {p.get('name', ''): [t for t in p.get('types', []) if t and t != 'notype'] for p in p1_team}
+            p1_stab_total = 0
+            p1_stab_t5 = 0
+            total_p1_moves = 0
+            for i, t in enumerate(timeline):
+                m1 = t.get('p1_move_details') or {}
+                if m1:
+                    total_p1_moves += 1
+                    mtype = (m1.get('type') or '').lower()
+                    p1n = (t.get('p1_pokemon_state', {}) or {}).get('name', '')
+                    ptypes = name_to_types.get(p1n, [])
+                    if mtype and any(mtype == ty.lower() for ty in ptypes):
+                        p1_stab_total += 1
+                        if i < 5:
+                            p1_stab_t5 += 1
+            features['p1_stab_turns_t5'] = p1_stab_t5
+            features['p1_stab_turns'] = p1_stab_total
+            features['p1_stab_share'] = (p1_stab_total / total_p1_moves) if total_p1_moves else 0.0
+            # Approximate P2 STAB when lead is active only
+            p2_lead_name = p2_lead.get('name', '')
+            p2_stab_lead = 0
+            p2_stab_lead_t5 = 0
+            for i, t in enumerate(timeline):
+                m2 = t.get('p2_move_details') or {}
+                if m2:
+                    mtype = (m2.get('type') or '').lower()
+                    p2n = (t.get('p2_pokemon_state', {}) or {}).get('name', '')
+                    if p2n == p2_lead_name and mtype and any(mtype == ty.lower() for ty in p2_lead_types):
+                        p2_stab_lead += 1
+                        if i < 5:
+                            p2_stab_lead_t5 += 1
+            features['p2_stab_lead_turns_t5'] = p2_stab_lead_t5
+            features['p2_stab_lead_turns'] = p2_stab_lead
+
+        T = len(p1_hp_series)
+        # HP diff per turn
+        hp_diff_series = [(p1_hp_series[i] - p2_hp_series[i]) for i in range(T)] if T else []
+
+        # Early damage dealt/taken (based on HP drops between consecutive turns)
+        def sum_damage(arr, upto):
+            s = 0.0
+            for i in range(1, min(upto, len(arr))):
+                drop = (arr[i-1] - arr[i])
+                if drop > 0:
+                    s += drop
+            return s
+
+        if FEATURE_FLAGS.get('early_advantage', True):
+            p1_damage_taken_t5 = sum_damage(p1_hp_series, 5)
+            p1_damage_taken_t10 = sum_damage(p1_hp_series, 10)
+            p2_damage_taken_t5 = sum_damage(p2_hp_series, 5)
+            p2_damage_taken_t10 = sum_damage(p2_hp_series, 10)
+            features['p1_damage_dealt_t5'] = p2_damage_taken_t5
+            features['p1_damage_dealt_t10'] = p2_damage_taken_t10
+            features['p1_damage_taken_t5'] = p1_damage_taken_t5
+            features['p1_damage_taken_t10'] = p1_damage_taken_t10
+            features['damage_diff_t5'] = (p2_damage_taken_t5 - p1_damage_taken_t5)
+            features['damage_diff_t10'] = (p2_damage_taken_t10 - p1_damage_taken_t10)
+
+        # Early status counts (t<=5, t<=10) for key statuses
+        def count_status(status_list, status_key, upto):
+            return sum(1 for i in range(min(upto, len(status_list))) if status_list[i] == status_key)
+
+        if FEATURE_FLAGS.get('early_status', True):
+            for k in ['slp', 'par', 'frz']:
+                features[f'p2_turns_{k}_t5'] = count_status(p2_status_series, k, 5)
+                features[f'p2_turns_{k}_t10'] = count_status(p2_status_series, k, 10)
+                features[f'p1_turns_{k}_t5'] = count_status(p1_status_series, k, 5)
+                features[f'p1_turns_{k}_t10'] = count_status(p1_status_series, k, 10)
+
+        # Share of turns ahead by HP
+        if FEATURE_FLAGS.get('hp_ahead_share', True):
+            if T > 0:
+                features['hp_ahead_share_t10'] = float(sum(1 for i in range(min(10, T)) if hp_diff_series[i] > 0)) / float(min(10, T))
+                features['hp_ahead_share_t20'] = float(sum(1 for i in range(min(20, T)) if hp_diff_series[i] > 0)) / float(min(20, T))
+            else:
+                features['hp_ahead_share_t10'] = 0.0
+                features['hp_ahead_share_t20'] = 0.0
+
+        # Extremes of HP advantage
+        if FEATURE_FLAGS.get('extremes', True):
+            if hp_diff_series:
+                max_val = max(hp_diff_series)
+                min_val = min(hp_diff_series)
+                features['max_hp_diff'] = max_val
+                features['min_hp_diff'] = min_val
+                features['argmax_hp_diff'] = (hp_diff_series.index(max_val) + 1)
+                features['argmin_hp_diff'] = (hp_diff_series.index(min_val) + 1)
+            else:
+                features['max_hp_diff'] = 0.0
+                features['min_hp_diff'] = 0.0
+                features['argmax_hp_diff'] = 0
+                features['argmin_hp_diff'] = 0
+
+        # HP diff slopes over windows
+        if FEATURE_FLAGS.get('hp_slopes', True):
+            def slope_on_window(arr, i0, i1):
+                n = len(arr)
+                i1 = min(i1, n-1)
+                i0 = max(i0, 0)
+                if i1 - i0 + 1 >= 2 and n > 1 and i1 >= i0:
+                    xs = np.arange(i0, i1+1)
+                    ys = np.array(arr[i0:i1+1])
+                    try:
+                        m, b = np.polyfit(xs, ys, 1)
+                        return float(m)
+                    except Exception:
+                        return 0.0
+                return 0.0
+            features['hp_diff_slope_1_5'] = slope_on_window(hp_diff_series, 0, 4)
+            features['hp_diff_slope_6_10'] = slope_on_window(hp_diff_series, 5, 9)
+            features['hp_diff_slope_11_20'] = slope_on_window(hp_diff_series, 10, 19)
+
+        # HP diff area (integrated advantage/disadvantage)
+        if FEATURE_FLAGS.get('hp_area', True):
+            if hp_diff_series:
+                pos_area = float(sum(max(d, 0.0) for d in hp_diff_series))
+                neg_area = float(sum(min(d, 0.0) for d in hp_diff_series))
+                features['hp_advantage_area_pos'] = pos_area
+                features['hp_advantage_area_neg'] = neg_area
+                features['hp_advantage_area_abs'] = pos_area - neg_area
+            else:
+                features['hp_advantage_area_pos'] = 0.0
+                features['hp_advantage_area_neg'] = 0.0
+                features['hp_advantage_area_abs'] = 0.0
+
+        # First status on P2
+        if FEATURE_FLAGS.get('first_status', True):
+            p2_first_turn = 0
+            p2_first_type = 'none'
+            for i, s in enumerate(p2_status_series):
+                if s and s != 'nostatus':
+                    p2_first_turn = i + 1
+                    p2_first_type = s
+                    break
+            features['p2_first_status_turn'] = p2_first_turn if p2_first_turn else 0
+            status_code_map = {'slp': 1, 'frz': 2, 'par': 3, 'tox': 4, 'psn': 5, 'brn': 6}
+            features['p2_first_status_type_code'] = status_code_map.get(p2_first_type, 0)
+
+        # Immobilized turn proxies
+        if FEATURE_FLAGS.get('immobilized', True):
+            p1_immob = 0
+            p2_immob = 0
+            for i in range(T):
+                m1_cat = p1_moves[i][0]
+                m2_cat = p2_moves[i][0]
+                if p1_status_series[i] in ['slp', 'frz'] and not m1_cat:
+                    p1_immob += 1
+                if p2_status_series[i] in ['slp', 'frz'] and not m2_cat:
+                    p2_immob += 1
+            features['p1_immobilized_turns'] = p1_immob
+            features['p2_immobilized_turns'] = p2_immob
+
+        # Switching and faints
+        if FEATURE_FLAGS.get('switch_faints', True):
+            features['p2_pokemon_used'] = len({n for n in p2_names if n})
+            def count_faints(hp_series, name_series):
+                faints = 0
+                for i in range(1, len(hp_series)):
+                    if (hp_series[i-1] > 0 and hp_series[i] == 0) or (name_series[i] and name_series[i] != name_series[i-1] and hp_series[i-1] == 0):
+                        faints += 1
+                return faints
+            features['p1_faints'] = count_faints(p1_hp_series, p1_names)
+            features['p2_faints'] = count_faints(p2_hp_series, p2_names)
+
+        # Move-level signals (shares, priority, power)
+        if FEATURE_FLAGS.get('move_mix', True):
+            def move_stats(moves):
+                total = sum(1 for c, _, _ in moves if c)
+                status = sum(1 for c, _, _ in moves if c == 'STATUS')
+                phys_spec = [(bp) for c, bp, _ in moves if c in ('PHYSICAL', 'SPECIAL')]
+                prio = sum(1 for _, _, pr in moves if pr and pr > 0)
+                share_status = (status / total) if total else 0.0
+                mean_bp = (float(np.mean(phys_spec)) if phys_spec else 0.0)
+                return share_status, prio, mean_bp
+            p1_share_status, p1_prio, p1_mean_bp = move_stats(p1_moves)
+            p2_share_status, p2_prio, p2_mean_bp = move_stats(p2_moves)
+            features['p1_share_status_moves'] = p1_share_status
+            features['p2_share_status_moves'] = p2_share_status
+            features['p1_priority_moves'] = p1_prio
+            features['p2_priority_moves'] = p2_prio
+            features['p1_mean_base_power'] = p1_mean_bp
+            features['p2_mean_base_power'] = p2_mean_bp
+
+        # Type enhancements
+        # Team coverage: count of P1 team types that are >=2x vs P2 lead
+        if FEATURE_FLAGS.get('type_enhance', True):
+            team_se_count = 0
+            for p in p1_team:
+                for t1 in [tt for tt in p.get('types', []) if tt and tt != 'notype']:
+                    mult = get_type_effectiveness(t1, p2_lead_types)
+                    if mult >= 2.0:
+                        team_se_count += 1
+                        break
+            features['team_super_effective_count'] = team_se_count
+            features['team_has_any_2x'] = 1 if team_se_count > 0 else 0
+
+            # Defensive risk: max effectiveness of P2 used move types vs P1 lead types
+            p1_lead_types_nonempty = p1_lead_types if p1_lead_types else []
+            max_def_risk = 1.0
+            for turn in timeline:
+                m2 = turn.get('p2_move_details') or {}
+                m2_type = (m2.get('type') or '').lower()
+                if m2_type:
+                    mult = get_type_effectiveness(m2_type, p1_lead_types_nonempty)
+                    if mult > max_def_risk:
+                        max_def_risk = mult
+            features['p1_lead_defensive_risk_max'] = max_def_risk
+
         # Stat boost accumulation (turn 10 and 20)
         for turn_idx in [9, 19]:  # Turn 10, 20
             if len(timeline) > turn_idx:
@@ -219,12 +521,15 @@ def main():
     print("="*70)
     print("FEATURE ENGINEERING - TRAINING DATA ONLY")
     print(f"Using {N_JOBS} CPU cores")
+    print("Feature flags:")
+    for k in sorted(FEATURE_FLAGS.keys()):
+        print(f"  {k}: {FEATURE_FLAGS[k]}")
     print("="*70)
     
     # Load training data
     print("\n[1/3] Loading training data...")
     train_data = []
-    train_file = 'train.jsonl'
+    train_file = 'fds-pokemon-battles-prediction-2025/train.jsonl'
     
     with open(train_file, 'r') as f:
         for line in f:
