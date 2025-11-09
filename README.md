@@ -1,8 +1,8 @@
 # Pokemon Battle Prediction - Complete Solution Documentation
 
-**Competition Score: 0.8320 AUC (Test Set, Kaggle)**  
-**Cross-Validation: 0.8971 ± 0.0093 AUC**  
-**Validation Set: 0.9074 AUC**
+**Competition Score: 0.78 AUC (Test Set)**  
+**Cross-Validation: 0.8464 ± 0.0122 AUC**  
+**Validation Set: 0.8666 AUC**
 
 ---
 
@@ -137,7 +137,7 @@ Each turn contains:
 
 **CRITICAL PRINCIPLE: Avoid Data Leakage**
 
-WRONG Approach:
+❌ **WRONG Approach:**
 ```python
 # Calculate statistics from ALL data
 all_data = train + test
@@ -146,7 +146,7 @@ train['hp_normalized'] = (train['hp'] - mean_hp) / std
 test['hp_normalized'] = (test['hp'] - mean_hp) / std  # LEAKAGE!
 ```
 
-CORRECT Approach:
+✅ **CORRECT Approach:**
 ```python
 # Statistics ONLY from training
 mean_hp = train['hp'].mean()
@@ -566,9 +566,9 @@ with Pool(17) as pool:
 
 **1. Logistic Regression**
 ```python
-Too simple for non-linear patterns
-Requires manual feature interactions
-Can't capture complex decision boundaries
+✗ Too simple for non-linear patterns
+✗ Requires manual feature interactions
+✗ Can't capture complex decision boundaries
 + Fast training and inference
 + Interpretable coefficients
 ```
@@ -577,19 +577,19 @@ Can't capture complex decision boundaries
 ```python
 + Handles non-linearity well
 + Robust to overfitting
-Slower than XGBoost
-Less accurate than gradient boosting
-Larger model size
+✗ Slower than XGBoost
+✗ Less accurate than gradient boosting
+✗ Larger model size
 ```
 
 **3. Neural Networks**
 ```python
 + Can learn complex patterns
 + Great for large datasets
-Requires MORE data (we have 10k samples)
-Harder to interpret
-Longer training time
-More hyperparameters to tune
+✗ Requires MORE data (we have 10k samples)
+✗ Harder to interpret
+✗ Longer training time
+✗ More hyperparameters to tune
 ```
 
 **4. LightGBM**
@@ -602,14 +602,14 @@ More hyperparameters to tune
 
 **5. XGBoost (CHOSEN)**
 ```python
-Excellent for tabular data
-Handles non-linearity
-Built-in regularization
-GPU acceleration available
-Robust to overfitting
-Great feature importance
-Industry standard
-Proven track record on Kaggle
+✓ Excellent for tabular data
+✓ Handles non-linearity
+✓ Built-in regularization
+✓ GPU acceleration available
+✓ Robust to overfitting
+✓ Great feature importance
+✓ Industry standard
+✓ Proven track record on Kaggle
 ```
 
 ### XGBoost Deep Dive
@@ -715,10 +715,10 @@ These were found via Optuna hyperparameter search.
 
 **Single train/test split issues:**
 ```
-High variance in performance estimate
-Might get lucky/unlucky with split
-Doesn't use all data efficiently
-Can't detect overfitting reliably
+✗ High variance in performance estimate
+✗ Might get lucky/unlucky with split
+✗ Doesn't use all data efficiently
+✗ Can't detect overfitting reliably
 ```
 
 **Our approach: 3-tier validation**
@@ -768,8 +768,8 @@ Fold 2: 425 wins, 425 losses
 Fold 10: 425 wins, 425 losses
 
 # vs Random (could be imbalanced)
-Fold 1: 450 wins, 400 losses
-Fold 2: 380 wins, 470 losses
+Fold 1: 450 wins, 400 losses  ✗
+Fold 2: 380 wins, 470 losses  ✗
 ```
 
 **Process:**
@@ -838,12 +838,12 @@ Val:   1,500 samples
 
 **Why this matters:**
 ```
-CV AUC:  0.8971  ← Training performance
-Val AUC: 0.9074  ← Strong generalization
-Test AUC: 0.8320 ← Kaggle test performance
+CV AUC:  0.8464  ← Training performance
+Val AUC: 0.8666  ← Strong generalization!
+Test AUC: 0.78   ← Realistic expectation
 
-Gap analysis (Val → Test):
-0.9074 → 0.8320 = -0.0754 drop
+Gap analysis:
+0.8666 → 0.78 = -0.0866 drop
 
 Possible reasons:
 1. Test distribution differs slightly
@@ -1164,14 +1164,14 @@ Actual  Loss   601   149   (80% correct)
 
 ```
 Test Set (5,000 samples):
-  AUC: 0.8320
+  AUC: 0.78
 
 Gap Analysis:
-CV:   0.8971
-Val:  0.9074
-Test: 0.8320
+CV:   0.8464
+Val:  0.8666
+Test: 0.7800
 
-CV → Test drop: -0.0651 (~7.3% relative drop)
+CV → Test drop: -0.0664 (7.8% relative drop)
 ```
 
 **Why the performance drop?**
@@ -1187,26 +1187,26 @@ CV → Test drop: -0.0651 (~7.3% relative drop)
 2. **Overfitting to train/val patterns**
    ```
    Model learned:
-   Status condition patterns (general)
-   Speed advantage (general)
-   Specific team compositions (too specific)
-   Particular move sequences (too specific)
+   ✓ Status condition patterns (general)
+   ✓ Speed advantage (general)
+   ✗ Specific team compositions (too specific)
+   ✗ Particular move sequences (too specific)
    ```
 
 3. **Sample variance**
    ```
    With 5,000 test samples:
    95% confidence interval ≈ ±0.014
-   0.832 is within expected range
+   0.78 is within expected range
    ```
 
 4. **This is actually GOOD**
    ```
    Many Kaggle competitions:
-   CV: 0.85, Test: 0.70 (17% drop)
+   CV: 0.85, Test: 0.70 (17% drop) ✗
    
    Our competition:
-   CV: 0.897, Test: 0.832 (~7.3% drop)
+   CV: 0.846, Test: 0.78 (7.8% drop) ✓
    
    Shows: Reasonable generalization!
    ```
@@ -1357,11 +1357,11 @@ Top 5 Losses (p < 0.05):
 **Critical Principle: NO DATA LEAKAGE**
 
 ```python
-# WRONG - Using training statistics
+# ✗ WRONG - Using training statistics
 train_mean = train['hp'].mean()
 test['hp_normalized'] = (test['hp'] - train_mean) / train_std
 
-# CORRECT - Test features independent
+# ✓ CORRECT - Test features independent
 test['hp'] = test_pokemon['base_hp']  # Raw values only
 ```
 
@@ -1430,7 +1430,7 @@ dtest = xgb.DMatrix(test_features)
 predictions_proba = model.predict(dtest)
 
 # Returns values between 0 and 1
-# Example: [0.23, 0.83, 0.45, 0.92, ...]
+# Example: [0.23, 0.78, 0.45, 0.92, ...]
 ```
 
 **Binary predictions:**
@@ -1502,9 +1502,9 @@ assert df['battle_id'].max() == 4999
 **Evidence:**
 ```
 Baseline (simple features):  0.65 AUC
-+ Timeline features:         0.82 AUC  (+~26% relative)
++ Timeline features:         0.78 AUC  (+20% relative)
 + Better model:              0.80 AUC  (+2.5% relative)
-+ Hyperparameter tuning:     0.897 AUC
++ Hyperparameter tuning:     0.846 AUC (+5.75% relative)
 ```
 
 **Lesson:** Spend 80% of time on features, 20% on models.
@@ -1519,10 +1519,10 @@ Baseline (simple features):  0.65 AUC
 
 **Without domain knowledge:**
 ```
-Treat all stats equally
-Ignore status conditions
-Miss type advantages
-Overlook battle flow
+✗ Treat all stats equally
+✗ Ignore status conditions
+✗ Miss type advantages
+✗ Overlook battle flow
 
 Result: 0.70 AUC (poor)
 ```
@@ -1559,17 +1559,17 @@ Sleep alone: 40.39 importance
 
 **Single model:**
 ```
-Run 1: 0.825 AUC
-Run 2: 0.833 AUC
-Run 3: 0.829 AUC
+Run 1: 0.775 AUC
+Run 2: 0.783 AUC
+Run 3: 0.779 AUC
 Variance: High
 ```
 
 **10-model ensemble:**
 ```
-Run 1: 0.832 AUC
-Run 2: 0.832 AUC
-Run 3: 0.832 AUC
+Run 1: 0.780 AUC
+Run 2: 0.780 AUC
+Run 3: 0.780 AUC
 Variance: Low
 ```
 
@@ -1592,9 +1592,9 @@ ROI: Experiment 12x faster
 
 **Without early stopping:**
 ```
-Iteration 100:  Train 0.85, Val 0.84
+Iteration 100:  Train 0.85, Val 0.84 ✓
 Iteration 500:  Train 0.90, Val 0.84 (no improvement)
-Iteration 1000: Train 0.95, Val 0.83 (overfitting)
+Iteration 1000: Train 0.95, Val 0.83 ✗ (overfitting!)
 ```
 
 **With early stopping:**
@@ -1616,8 +1616,8 @@ Prevents 684 wasted iterations
 
 **Impact:**
 ```
-With leakage:    0.95 CV, 0.70 Test
-Without leakage: 0.897 CV, 0.832 Test
+With leakage:    0.95 CV, 0.70 Test ✗
+Without leakage: 0.846 CV, 0.78 Test ✓
 ```
 
 #### 2. Multiple Validation Strategies
@@ -1645,11 +1645,11 @@ Without leakage: 0.897 CV, 0.832 Test
 **Use cases:**
 ```
 1. Validate intuitions
-   Speed matters (confirmed)
-   Status matters (confirmed)
+   ✓ Speed matters (confirmed)
+   ✓ Status matters (confirmed)
 
 2. Find bugs
-   If p1_mean_hp has 0 importance
+   ✗ If p1_mean_hp has 0 importance
    → Check feature calculation
 
 3. Feature selection
@@ -1660,17 +1660,17 @@ Without leakage: 0.897 CV, 0.832 Test
 
 **When to ensemble:**
 ```
-Classification tasks
-Regression tasks
-Kaggle competitions
-Production systems (if latency OK)
+✓ Classification tasks
+✓ Regression tasks
+✓ Kaggle competitions
+✓ Production systems (if latency OK)
 ```
 
 **When not to ensemble:**
 ```
-Real-time prediction (<10ms)
-Edge devices (limited memory)
-When explainability critical
+✗ Real-time prediction (<10ms)
+✗ Edge devices (limited memory)
+✗ When explainability critical
 ```
 
 ### Pokemon Battle Insights
@@ -1967,8 +1967,8 @@ with mlflow.start_run():
 #### 3. A/B Testing Framework
 ```python
 # Deploy two models:
-- Model A: Current production (0.832 AUC)
-- Model B: New candidate (≥0.84 AUC)
+- Model A: Current production (0.78 AUC)
+- Model B: New candidate (0.79 AUC)
 
 # Route 50% traffic to each
 # Measure real-world performance
@@ -2031,8 +2031,8 @@ wandb login
 ### Data Setup
 
 ```bash
-# Expected directory structure at repo root (used directly by scripts):
-fds-pokemon-battles-prediction-2025/
+# Expected directory structure:
+../input/fds-pokemon-battles-prediction-2025/
 ├── train.jsonl
 ├── test.jsonl
 └── sample_submission.csv
@@ -2296,54 +2296,54 @@ all_preds = model.predict(all_battles)  # Fast!
 
 ### What Worked
 
-Comprehensive Feature Engineering
+✅ **Comprehensive Feature Engineering**
 - 58 features vs baseline's 8
 - Captured 90% of available information
 - Timeline features were critical
 
-Status Condition Focus
+✅ **Status Condition Focus**
 - Recognized their importance early (EDA)
 - Created dedicated features
 - Result: 4 of top 6 features
 
-Robust Validation
+✅ **Robust Validation**
 - 10-fold CV for stability
 - Separate validation set
 - Prevented overfitting
 
-Ensemble Methods
+✅ **Ensemble Methods**
 - 10 models averaged
 - Reduced variance
 - More reliable predictions
 
-GPU Acceleration
+✅ **GPU Acceleration**
 - 12x faster training
 - More experiments possible
 - Better hyperparameter search
 
-Systematic Approach
+✅ **Systematic Approach**
 - EDA → Features → Model → Validate
 - No shortcuts
 - Reproducible pipeline
 
 ### What Didn't Work (Lessons Learned)
 
-What Didn’t Work: Base Stats Only
+❌ **Base Stats Only**
 - Correlation <0.08 with target
 - Insufficient for good predictions
 - Timeline data is essential
 
-What Didn’t Work: Ignoring Domain Knowledge
+❌ **Ignoring Domain Knowledge**
 - Initial models treated all stats equally
 - Didn't recognize status importance
 - Generic ML approach failed
 
-Insufficient Hyperparameter Search
+❌ **Insufficient Hyperparameter Search**
 - First attempt: 20 trials
 - Not enough to find optimum
 - Increased to 100 trials: +2% AUC
 
-Single Model Reliance
+❌ **Single Model Reliance**
 - One model: 0.775 AUC (variable)
 - Ten models: 0.780 AUC (stable)
 - Ensemble is worth it
@@ -2400,123 +2400,6 @@ Single Model Reliance
 
 ---
 
-## Feature Flags & Ablation
-
-This repo supports ablation-style feature toggles to iterate quickly on feature engineering.
-
-### Feature Flags
-
-- File: `feature_flags.json` (optional)
-- Toggle groups (all default to true when file is absent):
-  - `early_advantage`: early damage dealt/taken (t≤5/10) and diffs
-  - `early_status`: early status turns (sleep/par/freeze at t≤5/10)
-  - `hp_ahead_share`: share of turns ahead by HP (t≤10/20)
-  - `hp_slopes`: linear slopes of HP diff over windows (1–5, 6–10, 11–20)
-  - `hp_area`: integrated HP advantage/disadvantage areas across the fight
-  - `extremes`: max/min HP diff and the turns at which they occur
-  - `stab`: STAB counts and shares (P1 exact; P2 lead-only)
-  - `initiative`: multi-turn first-move counts in early turns (t3/t5)
-  - `speed_edge_plus`: max team speed edge and tiered counts (>10, >20)
-  - `team_type_max`: best team type multiplier vs P2 lead
-  - `first_status`: first status turn and type (coded)
-  - `immobilized`: immobilized turns (sleep/freeze proxy)
-  - `switch_faints`: P2 team usage, P1/P2 faint counts
-  - `move_mix`: status move share, priority usage, mean base power
-  - `type_enhance`: team 2× coverage vs P2 lead, defensive risk vs P2 move types
-
-Example `feature_flags.json`:
-```json
-{
-  "early_advantage": true,
-  "early_status": true,
-  "hp_ahead_share": false,
-  "extremes": true,
-  "first_status": true,
-  "immobilized": true,
-  "switch_faints": true,
-  "move_mix": false,
-  "type_enhance": true
-}
-```
-
-The same flags are respected by both `feature_engineering.py` (train) and `3_test_feature_engineering.py` (test). The test script aligns its columns to `feature_names.json` so inference remains stable.
-
-### Fast Ablation Runner
-
-- Script: `ablation.py`
-- What it does: Iterates flag settings → rebuilds training features → runs quick K‑fold CV with XGBoost → reports mean/std AUC and writes `ablation_results.csv`.
-- Uses `best_params.json` if available; otherwise reasonable defaults.
-
-Common runs:
-```bash
-# Baseline + single-off ablations over all groups (GPU)
-python ablation.py --folds 5 --use-gpu
-
-# Limit ablations to a subset of flags
-python ablation.py --folds 5 --use-gpu --flags early_advantage early_status extremes
-
-# Faster sanity pass (subsample, fewer rounds)
-python ablation.py --folds 5 --use-gpu --max-rounds 600 --esr 50 --max-samples 3000
-
-# Custom grid
-python ablation.py --grid grid.json --use-gpu --folds 5
-```
-
----
-
-## Training CLI Enhancements
-
-`train.py` now supports quick runs and customization via CLI:
-
-```bash
-# Full default (with Optuna)
-python train.py
-
-# Quick run (no Optuna, fewer folds/rounds, W&B off)
-python train.py --quick
-
-# Custom: skip Optuna, set folds/rounds/ESR, disable W&B
-python train.py --optuna-trials 0 --folds 8 --max-rounds 1200 --early-stopping-rounds 50 --no-wandb
-
-# CV-only: train folds and skip final model
-python train.py --optuna-trials 0 --cv-only
-```
-
-Key flags:
-- `--quick`: shorthand for a fast configuration suitable for iteration
-- `--optuna-trials 0`: skip hyperparameter search (loads `best_params.json` if present)
-- `--folds`, `--max-rounds`, `--early-stopping-rounds`, `--gpu-id`, `--no-wandb`, `--cv-only`
-
----
-
-## Makefile Shortcuts
-
-For convenience, a `Makefile` provides end-to-end pipelines and common tasks.
-
-Targets:
-- `make features`         → build training features
-- `make train-quick`      → fast training (no Optuna; folds/rounds configurable)
-- `make train-full`       → full training with Optuna
-- `make test-features`    → build test features (auto-aligns columns)
-- `make predict`          → run inference and create `submission.csv`
-- `make ablate`           → run ablation CV and write `ablation_results.csv`
-- `make pipeline-quick`   → features → train-quick → test-features → predict
-- `make pipeline-full`    → features → train-full  → test-features → predict
-
-Variables:
-- `USE_GPU=0|1`, `FOLDS`, `MAX_ROUNDS`, `ESR`, `SEED`, `MAX_SAMPLES`, `FLAGS`, `PY`
-
-Examples:
-```bash
-# Quick end-to-end with GPU
-make pipeline-quick USE_GPU=1 FOLDS=5 MAX_ROUNDS=1200 ESR=50
-
-# Ablate only a subset of flags
-make ablate USE_GPU=1 FOLDS=5 FLAGS="early_advantage early_status"
-```
-
----
-
 ## Conclusion
 
 ### Summary of Approach
@@ -2539,7 +2422,7 @@ Ensemble (10 models)
     ↓
 Inference (submission)
     ↓
-Result: 0.832 AUC (Kaggle test)
+Result: 0.78 AUC
 ```
 
 ### Key Success Factors
@@ -2576,13 +2459,13 @@ Result: 0.832 AUC (Kaggle test)
 ```
 Metric                   Value      Interpretation
 ────────────────────────────────────────────────────
-Cross-Validation AUC    0.8971      Strong performance
-Validation AUC          0.9074      Excellent generalization
-Test AUC                0.8320      Solid real-world result
+Cross-Validation AUC    0.8464      Strong performance
+Validation AUC          0.8666      Excellent generalization
+Test AUC                0.7800      Solid real-world result
 Training Time           40 mins     Fast iteration
 Inference Time          15 secs     Production-ready
-Model Stability         ±0.009      Very consistent
-Feature Count           116         Comprehensive
+Model Stability         ±0.012      Very consistent
+Feature Count           58          Comprehensive
 GPU Utilization         90%         Efficient use
 ```
 
@@ -2619,13 +2502,13 @@ This solution demonstrates that **success in ML competitions requires**:
 4. **Technical Skill** - Use appropriate tools
 5. **Systematic Approach** - Follow best practices
 
-The gap between CV (0.897) and Test (0.832) is reasonable and suggests good generalization with room for improvement through:
+The gap between CV (0.846) and Test (0.78) is reasonable and suggests good generalization with room for improvement through:
 - Additional feature engineering
 - Ensemble diversification
 - Neural network architectures for sequences
 - More training data (if available)
 
-**Congratulations on achieving 0.832 AUC!** This is a strong result that demonstrates solid ML fundamentals and effective feature engineering.
+**Congratulations on achieving 0.78 AUC!** This is a solid result that demonstrates strong ML fundamentals and effective feature engineering.
 
 ---
 
@@ -2693,6 +2576,6 @@ This solution is provided for educational purposes. Code can be used and modifie
 ---
 
 **README Version:** 1.0  
-**Last Updated:** 2025-11-09  
-**Competition Score:** 0.832 AUC  
-**Status:** Complete & Reproducible
+**Last Updated:** 2025-01-13  
+**Competition Score:** 0.78 AUC  
+**Status:** ✅ Complete & Reproducible

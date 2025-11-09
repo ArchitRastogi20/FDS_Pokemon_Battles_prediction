@@ -20,10 +20,10 @@ print("="*80)
 # CONFIGURATION
 # ============================================================================
 CONFIG = {
-    'use_ensemble': True,  # Use K-fold ensemble (RECOMMENDED)
+    'use_ensemble': True,  # Use 10-fold ensemble (RECOMMENDED)
     'n_folds': 10,
     'gpu_id': 0,
-    'threshold': 0.5,  # Default threshold (overridden by best_threshold.json if present)
+    'threshold': 0.5,  # Classification threshold
 }
 
 print(f"\nConfiguration:")
@@ -110,41 +110,9 @@ print("─"*80)
 # Create DMatrix
 dtest = xgb.DMatrix(X_test)
 
-# Try loading optimal threshold (prefer CV mean, fallback to holdout)
-loaded_threshold = False
-try:
-    with open('best_threshold_cv.json', 'r') as f:
-        thcv = json.load(f)
-        if isinstance(thcv, dict) and 'threshold_mean' in thcv:
-            CONFIG['threshold'] = float(thcv['threshold_mean'])
-            print(f"  Using CV-mean optimal threshold: {CONFIG['threshold']:.4f}")
-            loaded_threshold = True
-except Exception:
-    pass
-if not loaded_threshold:
-    try:
-        with open('best_threshold.json', 'r') as f:
-            th = json.load(f)
-            if isinstance(th, dict) and 'threshold' in th:
-                CONFIG['threshold'] = float(th['threshold'])
-                print(f"  Using holdout optimal threshold: {CONFIG['threshold']:.4f}")
-    except Exception:
-        pass
-
 if len(models) > 1:
     print(f"  Using ensemble of {len(models)} models...")
     
-    # Prepare AUC-based weights if fold_scores.csv exists
-    weights = None
-    try:
-        fs = pd.read_csv('fold_scores.csv')
-        aucs = fs.sort_values('fold')['auc'].values[:len(models)]
-        w = np.maximum(aucs, 1e-6)
-        weights = w / w.sum()
-        print(f"  AUC-weighted ensemble enabled")
-    except Exception:
-        pass
-
     # Collect predictions from all models
     all_predictions = []
     for i, (model, name) in enumerate(zip(models, model_names), 1):
@@ -153,10 +121,7 @@ if len(models) > 1:
         print(f"    {name:12} - Mean prob: {preds.mean():.4f} | Std: {preds.std():.4f}")
     
     # Average predictions (ensemble)
-    if weights is not None and len(weights) == len(all_predictions):
-        predictions_proba = np.average(np.vstack(all_predictions), axis=0, weights=weights)
-    else:
-        predictions_proba = np.mean(all_predictions, axis=0)
+    predictions_proba = np.mean(all_predictions, axis=0)
     predictions_std = np.std(all_predictions, axis=0)
     
     print(f"\n  Ensemble Statistics:")
