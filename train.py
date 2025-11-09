@@ -3,10 +3,20 @@ ULTIMATE Training Script - Pokemon Battle Prediction
 - GPU acceleration (CUDA) with V100
 - K-Fold Cross Validation (10 folds)
 - Train/Val split for monitoring
-- Hyperparameter tuning with Optuna
-- W&B integration for tracking
+- Hyperparameter tuning with Optuna (toggle via CLI)
+- W&B integration for tracking (toggle via CLI)
 - Feature importance analysis
 - Model ensembling
+
+CLI examples:
+  # Full run (default):
+  python train.py
+
+  # Quick run: skip Optuna, 5 folds, fewer rounds
+  python train.py --quick
+
+  # Custom run: no Optuna, 8 folds, set rounds/ESR
+  python train.py --optuna-trials 0 --folds 8 --max-rounds 1200 --early-stopping-rounds 50 --no-wandb
 """
 
 import pandas as pd
@@ -22,21 +32,25 @@ import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
+import argparse
+import os
 warnings.filterwarnings('ignore')
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 CONFIG = {
-    'n_folds': 10,
-    'test_size': 0.15,
-    'random_state': 42,
-    'n_trials': 100,  # Optuna hyperparameter search trials
-    'early_stopping_rounds': 100,
-    'gpu_id': 0,
-    'n_jobs': 17,  # For CPU-bound operations
-    'verbose_eval': 50,
+    "n_folds": 10,
+    "test_size": 0.15,
+    "random_state": 42,
+    "n_trials": 100,
+    "early_stopping_rounds": 100,
+    "max_rounds": 2000,
+    "device": "cpu",          # ✅ added
+    "n_jobs": 8,
+    "verbose_eval": 50
 }
+
 
 print("="*80)
 print("POKEMON BATTLE PREDICTION - ULTIMATE TRAINING PIPELINE")
@@ -49,8 +63,11 @@ print("="*80)
 # ============================================================================
 # WANDB INITIALIZATION
 # ============================================================================
-def init_wandb():
+def init_wandb(enable=True):
     """Initialize Weights & Biases"""
+    if not enable:
+        print("\n[WANDB] Disabled via CLI flag")
+        return False
     print("\n[WANDB] Initializing Weights & Biases...")
     
     try:
@@ -129,8 +146,8 @@ def objective(trial, X_train, y_train, use_wandb):
     params = {
         'objective': 'binary:logistic',
         'eval_metric': 'auc',
-        'tree_method': 'gpu_hist',
-        'gpu_id': CONFIG['gpu_id'],
+        "tree_method": "hist",   # CPU mode
+        "device": "cpu", 
         'predictor': 'gpu_predictor',
         
         # Hyperparameters to tune
@@ -165,9 +182,9 @@ def objective(trial, X_train, y_train, use_wandb):
         model = xgb.train(
             params,
             dtrain,
-            num_boost_round=1000,
+            num_boost_round=CONFIG.get('max_rounds', 1000),
             evals=[(dval, 'validation')],
-            early_stopping_rounds=50,
+            early_stopping_rounds=min(50, CONFIG.get('early_stopping_rounds', 50)),
             verbose_eval=False,
             callbacks=[pruning_callback]
         )
@@ -245,8 +262,8 @@ def train_with_kfold(X_train, y_train, best_params, use_wandb):
     params = {
         'objective': 'binary:logistic',
         'eval_metric': 'auc',
-        'tree_method': 'gpu_hist',
-        'gpu_id': CONFIG['gpu_id'],
+        "tree_method": "hist",   # ✅ CPU optimized
+    "device": "cpu",
         'predictor': 'gpu_predictor',
         **best_params
     }
@@ -259,6 +276,7 @@ def train_with_kfold(X_train, y_train, best_params, use_wandb):
     models = []
     feature_importance_list = []
     
+    fold_thresholds = []
     for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train), 1):
         print(f"\n{'─'*80}")
         print(f"Fold {fold}/{CONFIG['n_folds']}")
@@ -276,7 +294,7 @@ def train_with_kfold(X_train, y_train, best_params, use_wandb):
         model = xgb.train(
             params,
             dtrain,
-            num_boost_round=2000,
+            num_boost_round=CONFIG.get('max_rounds', 2000),
             evals=[(dtrain, 'train'), (dval, 'validation')],
             early_stopping_rounds=CONFIG['early_stopping_rounds'],
             verbose_eval=CONFIG['verbose_eval']
@@ -293,6 +311,15 @@ def train_with_kfold(X_train, y_train, best_params, use_wandb):
         fold_auc = roc_auc_score(y_fold_val, val_preds_proba)
         fold_acc = accuracy_score(y_fold_val, val_preds_binary)
         fold_logloss = log_loss(y_fold_val, val_preds_proba)
+        # Best threshold per fold (max accuracy)
+        try:
+            thresholds = np.linspace(0.01, 0.99, 99)
+            accs = [accuracy_score(y_fold_val, (val_preds_proba >= th).astype(int)) for th in thresholds]
+            best_idx = int(np.argmax(accs))
+            fold_best_th = float(thresholds[best_idx])
+            fold_thresholds.append(fold_best_th)
+        except Exception:
+            pass
         
         fold_scores.append({
             'fold': fold,
@@ -345,6 +372,18 @@ def train_with_kfold(X_train, y_train, best_params, use_wandb):
     print(f"  TN: {cm[0,0]:5,} | FP: {cm[0,1]:5,}")
     print(f"  FN: {cm[1,0]:5,} | TP: {cm[1,1]:5,}")
     
+    # Save CV thresholds
+    if fold_thresholds:
+        th_summary = {
+            'thresholds': fold_thresholds,
+            'threshold_mean': float(np.mean(fold_thresholds)),
+            'threshold_std': float(np.std(fold_thresholds)),
+            'computed_on': 'kfold_validation_splits'
+        }
+        with open('best_threshold_cv.json', 'w') as f:
+            json.dump(th_summary, f, indent=4)
+        print(f"\nSaved per-fold optimal thresholds to best_threshold_cv.json (mean={th_summary['threshold_mean']:.4f})")
+
     if use_wandb:
         wandb.log({
             'cv_mean_auc': np.mean([s['auc'] for s in fold_scores]),
@@ -369,8 +408,8 @@ def train_final_model(X_train, y_train, X_val, y_val, best_params, use_wandb):
     params = {
         'objective': 'binary:logistic',
         'eval_metric': 'auc',
-        'tree_method': 'gpu_hist',
-        'gpu_id': CONFIG['gpu_id'],
+        "tree_method": "hist",   # ✅ CPU optimized
+    "device": "cpu",
         'predictor': 'gpu_predictor',
         **best_params
     }
@@ -382,7 +421,7 @@ def train_final_model(X_train, y_train, X_val, y_val, best_params, use_wandb):
     final_model = xgb.train(
         params,
         dtrain,
-        num_boost_round=2000,
+        num_boost_round=CONFIG.get('max_rounds', 2000),
         evals=[(dtrain, 'train'), (dval, 'validation')],
         early_stopping_rounds=CONFIG['early_stopping_rounds'],
         verbose_eval=CONFIG['verbose_eval']
@@ -401,6 +440,26 @@ def train_final_model(X_train, y_train, X_val, y_val, best_params, use_wandb):
     print(f"  Accuracy: {val_acc:.6f}")
     print(f"  LogLoss:  {val_logloss:.6f}")
     print(f"  Best iteration: {final_model.best_iteration}")
+
+    # Find best threshold for accuracy on validation
+    try:
+        thresholds = np.linspace(0.01, 0.99, 99)
+        accs = []
+        for th in thresholds:
+            accs.append(accuracy_score(y_val, (val_preds_proba >= th).astype(int)))
+        best_idx = int(np.argmax(accs))
+        best_th = float(thresholds[best_idx])
+        best_acc = float(accs[best_idx])
+        with open('best_threshold.json', 'w') as f:
+            json.dump({
+                'threshold': best_th,
+                'accuracy': best_acc,
+                'val_auc': float(val_auc),
+                'computed_on': 'validation_holdout'
+            }, f, indent=4)
+        print(f"\nOptimal threshold (max accuracy on val): {best_th:.4f} | Acc={best_acc:.6f}")
+    except Exception as e:
+        print(f"\n[WARN] Could not compute/save best threshold: {e}")
     
     print(f"\nDetailed Classification Report:")
     print(classification_report(y_val, val_preds_binary, target_names=['Loss', 'Win'], digits=4))
@@ -481,8 +540,9 @@ def save_artifacts(models, final_model, best_params, fold_scores, feature_names,
         print(f"  ✓ Saved {filename}")
     
     # Save final model
-    final_model.save_model('model_final.json')
-    print(f"  ✓ Saved model_final.json")
+    if final_model is not None:
+        final_model.save_model('model_final.json')
+        print(f"  ✓ Saved model_final.json")
     
     # Save best parameters
     with open('best_params.json', 'w') as f:
@@ -514,11 +574,66 @@ def save_artifacts(models, final_model, best_params, fold_scores, feature_names,
 # ============================================================================
 # MAIN PIPELINE
 # ============================================================================
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('--quick', action='store_true', help='Quick run: no Optuna, folds=5, max_rounds=1200, ESR=50, no W&B')
+    p.add_argument('--optuna-trials', type=int, default=None, help='Number of Optuna trials (0 to skip)')
+    p.add_argument('--folds', type=int, default=None, help='Number of CV folds')
+    p.add_argument('--max-rounds', type=int, default=None, help='Max boosting rounds (num_boost_round)')
+    p.add_argument('--early-stopping-rounds', type=int, default=None, help='Early stopping rounds')
+    p.add_argument('--gpu-id', type=int, default=None, help='GPU id for XGBoost')
+    p.add_argument('--no-wandb', action='store_true', help='Disable W&B logging')
+    p.add_argument('--cv-only', action='store_true', help='Run K-Fold CV only, skip final model')
+    return p.parse_args()
+
+
+def apply_args_to_config(args):
+    if args.quick:
+        CONFIG['n_trials'] = 0
+        CONFIG['n_folds'] = 5
+        CONFIG['max_rounds'] = 1200
+        CONFIG['early_stopping_rounds'] = 50
+    if args.optuna_trials is not None:
+        CONFIG['n_trials'] = int(args.optuna_trials)
+    if args.folds is not None:
+        CONFIG['n_folds'] = int(args.folds)
+    if args.max_rounds is not None:
+        CONFIG['max_rounds'] = int(args.max_rounds)
+    if args.early_stopping_rounds is not None:
+        CONFIG['early_stopping_rounds'] = int(args.early_stopping_rounds)
+    if args.gpu_id is not None:
+        CONFIG['gpu_id'] = int(args.gpu_id)
+
+
+def load_params_when_skipping_optuna():
+    # Prefer best_params.json; else use a conservative default
+    fallback = {
+        'max_depth': 7,
+        'learning_rate': 0.05,
+        'subsample': 0.8,
+        'colsample_bytree': 0.8,
+        'colsample_bylevel': 0.8,
+        'min_child_weight': 10,
+        'gamma': 1.0,
+        'reg_alpha': 1.0,
+        'reg_lambda': 1.0,
+    }
+    try:
+        with open('best_params.json', 'r') as f:
+            loaded = json.load(f)
+        fallback.update(loaded)
+    except Exception:
+        pass
+    return fallback
+
+
 def main():
+    args = parse_args()
+    apply_args_to_config(args)
     start_time = datetime.now()
     
     # Initialize W&B
-    use_wandb = init_wandb()
+    use_wandb = init_wandb(enable=not args.no_wandb and not args.quick)
     
     # Load data
     X, y, battle_ids, feature_names = load_data()
@@ -526,8 +641,12 @@ def main():
     # Train-val split
     X_train, X_val, y_train, y_val = create_train_val_split(X, y, battle_ids)
     
-    # Hyperparameter optimization
-    best_params = optimize_hyperparameters(X_train, y_train, use_wandb)
+    # Hyperparameter optimization (or load params)
+    if CONFIG['n_trials'] and CONFIG['n_trials'] > 0:
+        best_params = optimize_hyperparameters(X_train, y_train, use_wandb)
+    else:
+        print("\n[OPTUNA] Skipping hyperparameter optimization (n_trials=0)")
+        best_params = load_params_when_skipping_optuna()
     
     # K-Fold cross validation
     models, fold_scores, oof_preds, oof_proba, feature_importance_list = train_with_kfold(
@@ -535,9 +654,15 @@ def main():
     )
     
     # Final model
-    final_model, val_auc, val_acc = train_final_model(
-        X_train, y_train, X_val, y_val, best_params, use_wandb
-    )
+    final_model = None
+    val_auc = float('nan')
+    val_acc = float('nan')
+    if not args.cv_only:
+        final_model, val_auc, val_acc = train_final_model(
+            X_train, y_train, X_val, y_val, best_params, use_wandb
+        )
+    else:
+        print("\n[FINAL] Skipping final model training (cv-only mode)")
     
     # Feature importance
     importance_df = analyze_feature_importance(feature_importance_list, feature_names, use_wandb)
@@ -555,10 +680,13 @@ def main():
     print(f"Training duration: {duration}")
     print(f"\nFinal Metrics:")
     print(f"  Cross-Validation AUC:  {np.mean([s['auc'] for s in fold_scores]):.6f} ± {np.std([s['auc'] for s in fold_scores]):.6f}")
-    print(f"  Validation AUC:        {val_auc:.6f}")
-    print(f"  Validation Accuracy:   {val_acc:.6f}")
+    if not args.cv_only:
+        print(f"  Validation AUC:        {val_auc:.6f}")
+        print(f"  Validation Accuracy:   {val_acc:.6f}")
+    else:
+        print("  Validation:            skipped (cv-only)")
     print(f"\nArtifacts saved:")
-    print(f"  • {CONFIG['n_folds']} fold models + 1 final model")
+    print(f"  • {CONFIG['n_folds']} fold models" + (" + 1 final model" if not args.cv_only else ""))
     print(f"  • best_params.json")
     print(f"  • fold_scores.csv")
     print(f"  • feature_importance.csv")

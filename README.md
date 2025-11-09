@@ -2031,8 +2031,8 @@ wandb login
 ### Data Setup
 
 ```bash
-# Expected directory structure:
-../input/fds-pokemon-battles-prediction-2025/
+# Expected directory structure at repo root (used directly by scripts):
+fds-pokemon-battles-prediction-2025/
 ├── train.jsonl
 ├── test.jsonl
 └── sample_submission.csv
@@ -2397,6 +2397,123 @@ all_preds = model.predict(all_battles)  # Fast!
    Different features
    Weighted averaging
    ```
+
+---
+
+## Feature Flags & Ablation
+
+This repo supports ablation-style feature toggles to iterate quickly on feature engineering.
+
+### Feature Flags
+
+- File: `feature_flags.json` (optional)
+- Toggle groups (all default to true when file is absent):
+  - `early_advantage`: early damage dealt/taken (t≤5/10) and diffs
+  - `early_status`: early status turns (sleep/par/freeze at t≤5/10)
+  - `hp_ahead_share`: share of turns ahead by HP (t≤10/20)
+  - `hp_slopes`: linear slopes of HP diff over windows (1–5, 6–10, 11–20)
+  - `hp_area`: integrated HP advantage/disadvantage areas across the fight
+  - `extremes`: max/min HP diff and the turns at which they occur
+  - `stab`: STAB counts and shares (P1 exact; P2 lead-only)
+  - `initiative`: multi-turn first-move counts in early turns (t3/t5)
+  - `speed_edge_plus`: max team speed edge and tiered counts (>10, >20)
+  - `team_type_max`: best team type multiplier vs P2 lead
+  - `first_status`: first status turn and type (coded)
+  - `immobilized`: immobilized turns (sleep/freeze proxy)
+  - `switch_faints`: P2 team usage, P1/P2 faint counts
+  - `move_mix`: status move share, priority usage, mean base power
+  - `type_enhance`: team 2× coverage vs P2 lead, defensive risk vs P2 move types
+
+Example `feature_flags.json`:
+```json
+{
+  "early_advantage": true,
+  "early_status": true,
+  "hp_ahead_share": false,
+  "extremes": true,
+  "first_status": true,
+  "immobilized": true,
+  "switch_faints": true,
+  "move_mix": false,
+  "type_enhance": true
+}
+```
+
+The same flags are respected by both `feature_engineering.py` (train) and `3_test_feature_engineering.py` (test). The test script aligns its columns to `feature_names.json` so inference remains stable.
+
+### Fast Ablation Runner
+
+- Script: `ablation.py`
+- What it does: Iterates flag settings → rebuilds training features → runs quick K‑fold CV with XGBoost → reports mean/std AUC and writes `ablation_results.csv`.
+- Uses `best_params.json` if available; otherwise reasonable defaults.
+
+Common runs:
+```bash
+# Baseline + single-off ablations over all groups (GPU)
+python ablation.py --folds 5 --use-gpu
+
+# Limit ablations to a subset of flags
+python ablation.py --folds 5 --use-gpu --flags early_advantage early_status extremes
+
+# Faster sanity pass (subsample, fewer rounds)
+python ablation.py --folds 5 --use-gpu --max-rounds 600 --esr 50 --max-samples 3000
+
+# Custom grid
+python ablation.py --grid grid.json --use-gpu --folds 5
+```
+
+---
+
+## Training CLI Enhancements
+
+`train.py` now supports quick runs and customization via CLI:
+
+```bash
+# Full default (with Optuna)
+python train.py
+
+# Quick run (no Optuna, fewer folds/rounds, W&B off)
+python train.py --quick
+
+# Custom: skip Optuna, set folds/rounds/ESR, disable W&B
+python train.py --optuna-trials 0 --folds 8 --max-rounds 1200 --early-stopping-rounds 50 --no-wandb
+
+# CV-only: train folds and skip final model
+python train.py --optuna-trials 0 --cv-only
+```
+
+Key flags:
+- `--quick`: shorthand for a fast configuration suitable for iteration
+- `--optuna-trials 0`: skip hyperparameter search (loads `best_params.json` if present)
+- `--folds`, `--max-rounds`, `--early-stopping-rounds`, `--gpu-id`, `--no-wandb`, `--cv-only`
+
+---
+
+## Makefile Shortcuts
+
+For convenience, a `Makefile` provides end-to-end pipelines and common tasks.
+
+Targets:
+- `make features`         → build training features
+- `make train-quick`      → fast training (no Optuna; folds/rounds configurable)
+- `make train-full`       → full training with Optuna
+- `make test-features`    → build test features (auto-aligns columns)
+- `make predict`          → run inference and create `submission.csv`
+- `make ablate`           → run ablation CV and write `ablation_results.csv`
+- `make pipeline-quick`   → features → train-quick → test-features → predict
+- `make pipeline-full`    → features → train-full  → test-features → predict
+
+Variables:
+- `USE_GPU=0|1`, `FOLDS`, `MAX_ROUNDS`, `ESR`, `SEED`, `MAX_SAMPLES`, `FLAGS`, `PY`
+
+Examples:
+```bash
+# Quick end-to-end with GPU
+make pipeline-quick USE_GPU=1 FOLDS=5 MAX_ROUNDS=1200 ESR=50
+
+# Ablate only a subset of flags
+make ablate USE_GPU=1 FOLDS=5 FLAGS="early_advantage early_status"
+```
 
 ---
 
