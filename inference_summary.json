@@ -1,0 +1,39 @@
+{
+    "timestamp": "2025-11-08 12:06:45",
+    "test_samples": 5000,
+    "models_used": 10,
+    "model_names": [
+        "Fold 1",
+        "Fold 2",
+        "Fold 3",
+        "Fold 4",
+        "Fold 5",
+        "Fold 6",
+        "Fold 7",
+        "Fold 8",
+        "Fold 9",
+        "Fold 10"
+    ],
+    "ensemble": true,
+    "threshold": 0.5039999999999999,
+    "predictions": {
+        "wins": 2485,
+        "losses": 2515,
+        "win_rate": 0.497
+    },
+    "confidence": {
+        "high": 3203,
+        "medium": 1350,
+        "low": 447
+    },
+    "statistics": {
+        "mean_probability": 0.49971754991306544,
+        "std_probability": 0.34386533966732546,
+        "min_probability": 0.012215089647625636,
+        "max_probability": 0.9879811398796398
+    },
+    "validation_checks": {
+        "passed": 6,
+        "total": 6
+    }
+}
