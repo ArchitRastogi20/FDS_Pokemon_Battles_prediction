@@ -1,0 +1,6 @@
+{
+    "threshold": 0.46,
+    "accuracy": 0.85,
+    "val_auc": 0.9068817777777778,
+    "computed_on": "validation_holdout"
+}
