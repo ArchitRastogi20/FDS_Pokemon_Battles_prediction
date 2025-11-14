@@ -1,0 +1,17 @@
+{
+  "early_advantage": true,
+  "early_status": true,
+  "hp_ahead_share": true,
+  "hp_slopes": true,
+  "hp_area": true,
+  "extremes": true,
+  "stab": true,
+  "initiative": true,
+  "speed_edge_plus": true,
+  "team_type_max": true,
+  "first_status": true,
+  "immobilized": true,
+  "switch_faints": true,
+  "move_mix": true,
+  "type_enhance": true
+}
