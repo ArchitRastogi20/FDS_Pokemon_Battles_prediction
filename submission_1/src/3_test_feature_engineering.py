@@ -1,10 +1,3 @@
-"""
-Test Feature Engineering Script
-Applies EXACT SAME feature engineering to test data as training
-NO DATA LEAKAGE - doesn't use any training statistics
-Creates test_features.csv with 58 features (same as training)
-"""
-
 import json
 import pandas as pd
 import numpy as np
@@ -15,14 +8,6 @@ warnings.filterwarnings('ignore')
 
 N_JOBS = 17
 
-print("="*80)
-print("TEST FEATURE ENGINEERING")
-print("="*80)
-print(f"Configuration:")
-print(f"  CPU cores: {N_JOBS}")
-print(f"  Goal: Extract 58 features from test battles")
-print(f"  NO data leakage - independent of training data")
-print("="*80)
 
 # ============================================================================
 # TYPE EFFECTIVENESS CHART (Pokemon Gen 1) - SAME AS TRAINING
@@ -223,29 +208,43 @@ def extract_features(battle):
 # ============================================================================
 # MAIN PROCESSING
 # ============================================================================
-def main():
-    print(f"\n[1/3] Loading test data...")
+def run_test_feature_engineering(test_path, output_path, n_jobs=17):
+    """
+    Extract same 58 features from test battles.
     
-    test_data = []
-    test_file = 'test.jsonl'
-    
-    try:
-        with open(test_file, 'r') as f:
-            for line in f:
-                test_data.append(json.loads(line))
+    Args:
+        test_path: Path to test.jsonl
+        output_path: Where to save test_features.csv
+        n_jobs: Number of CPU cores
         
-        print(f"✓ Loaded {len(test_data):,} test battles")
+    Returns:
+        DataFrame with engineered test features
+    """
+    # Update N_JOBS global variable
+    global N_JOBS
+    N_JOBS = n_jobs
     
-    except FileNotFoundError:
-        print(f"✗ ERROR: Could not find test file at '{test_file}'")
-        print(f"  Please ensure competition data is in '../input/fds-pokemon-battles-prediction-2025/'")
-        return None
+    print("="*80)
+    print("TEST FEATURE ENGINEERING")
+    print("="*80)
+    print(f"Configuration:")
+    print(f"  CPU cores: {n_jobs}")
+    print(f"  Goal: Extract 58 features from test battles")
+    print(f"  NO data leakage - independent of training data")
+    print("="*80)
+    
+    print(f"\n[1/3] Loading test data from: {test_path}")
+    test_data = []
+    
+    with open(test_path, 'r') as f:
+        for line in f:
+            test_data.append(json.loads(line))
+    
+    print(f"✓ Loaded {len(test_data):,} test battles")
     
     # Extract features in parallel
-    print(f"\n[2/3] Extracting features using {N_JOBS} cores...")
-    print(f"  This will take ~5-10 seconds...")
-    
-    with Pool(N_JOBS) as pool:
+    print(f"\n[2/3] Extracting features using {n_jobs} cores...")
+    with Pool(n_jobs) as pool:
         features_list = list(tqdm(
             pool.imap(extract_features, test_data),
             total=len(test_data),
@@ -255,8 +254,6 @@ def main():
     # Create DataFrame
     print(f"\n[3/3] Creating DataFrame and saving...")
     test_df = pd.DataFrame(features_list)
-    
-    # Ensure no NaN values
     test_df = test_df.fillna(0)
     
     # Verify feature count
@@ -264,47 +261,35 @@ def main():
     print(f"\n  Feature Verification:")
     print(f"    Total columns:   {len(test_df.columns)}")
     print(f"    Features:        {n_features}")
-    print(f"    battle_id:       1")
     print(f"    Expected:        58 features + 1 battle_id = 59 columns")
     
     if n_features != 58:
         print(f"\n  ⚠ WARNING: Expected 58 features but got {n_features}!")
-        print(f"  This may cause issues during inference!")
     else:
         print(f"\n  ✓ Feature count matches training! (58 features)")
     
     # Data quality checks
     null_count = test_df.isnull().sum().sum()
-    inf_count = np.isinf(test_df.values).sum()
+    inf_count = np.isinf(test_df.select_dtypes(include=[np.number]).values).sum()
     print(f"\n  Data Quality:")
     print(f"    Null values: {null_count:6} {'✓' if null_count==0 else '✗'}")
     print(f"    Inf values:  {inf_count:6} {'✓' if inf_count==0 else '✗'}")
     
     # Save to CSV
-    output_file = 'test_features.csv'
-    test_df.to_csv(output_file, index=False)
+    test_df.to_csv(output_path, index=False)
     
     print(f"\n{'='*80}")
-    print("TEST FEATURE ENGINEERING COMPLETE!")
+    print("✓ TEST FEATURE ENGINEERING COMPLETE!")
     print(f"{'='*80}")
-    print(f"Output file:     {output_file}")
+    print(f"Output file:     {output_path}")
     print(f"Total samples:   {len(test_df):,}")
     print(f"Total features:  {n_features}")
-    print(f"File size:       {test_df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-    
-    print(f"\nFeature Summary (first 15):")
-    print(f"  {test_df.columns.tolist()[:15]}")
-    
-    print(f"\nSample Statistics:")
-    print(test_df.describe().iloc[:, :5].to_string())
-    
-    print(f"\n{'='*80}")
-    print("READY FOR INFERENCE!")
-    print(f"{'='*80}")
-    print(f"Next step: python 4_inference.py")
-    print(f"{'='*80}\n")
     
     return test_df
 
+# Keep the old main() for backwards compatibility if needed
+def main():
+    return run_test_feature_engineering('test.jsonl', 'test_features.csv', N_JOBS)
+
 if __name__ == "__main__":
-    df = main()
+    main()

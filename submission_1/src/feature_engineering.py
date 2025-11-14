@@ -267,5 +267,64 @@ def main():
     
     return train_df
 
-if __name__ == "__main__":
-    df = main()
+def run_feature_engineering(train_path, output_path, n_jobs=17):
+    """
+    Extract 58 features from training battles.
+    
+    Args:
+        train_path: Path to train.jsonl
+        output_path: Where to save train_features.csv
+        n_jobs: Number of CPU cores
+        
+    Returns:
+        DataFrame with engineered features
+    """
+    print("="*70)
+    print("FEATURE ENGINEERING - TRAINING DATA")
+    print(f"Using {n_jobs} CPU cores")
+    print("="*70)
+    
+    # Update N_JOBS global variable
+    global N_JOBS
+    N_JOBS = n_jobs
+    
+    # Load training data
+    print(f"\n[1/3] Loading training data from: {train_path}")
+    train_data = []
+    
+    with open(train_path, 'r') as f:
+        for line in f:
+            train_data.append(json.loads(line))
+    
+    print(f"✓ Loaded {len(train_data):,} battles")
+    
+    # Extract features in parallel
+    print(f"\n[2/3] Extracting features using {n_jobs} cores...")
+    with Pool(n_jobs) as pool:
+        features_list = list(tqdm(
+            pool.imap(extract_features, train_data),
+            total=len(train_data),
+            desc="Processing battles"
+        ))
+    
+    # Create DataFrame
+    print("\n[3/3] Creating DataFrame and saving...")
+    train_df = pd.DataFrame(features_list)
+    train_df = train_df.fillna(0)
+    
+    # Save to CSV
+    train_df.to_csv(output_path, index=False)
+    
+    n_features = train_df.shape[1] - 2  # Exclude battle_id and player_won
+    
+    print(f"\n✓ Saved {len(train_df):,} rows to '{output_path}'")
+    print(f"\nFeature Summary:")
+    print(f"  Total features:  {n_features}")
+    print(f"  Target balance:  {train_df['player_won'].mean():.2%} wins")
+    print(f"  Columns: {train_df.shape[1]} ({n_features} features + battle_id + player_won)")
+    
+    print(f"\n{'='*70}")
+    print("✓ FEATURE ENGINEERING COMPLETE!")
+    print(f"{'='*70}")
+    
+    return train_df

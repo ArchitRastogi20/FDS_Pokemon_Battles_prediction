@@ -1,14 +1,3 @@
-"""
-ULTIMATE Training Script - Pokemon Battle Prediction
-- GPU acceleration (CUDA) with V100
-- K-Fold Cross Validation (10 folds)
-- Train/Val split for monitoring
-- Hyperparameter tuning with Optuna
-- W&B integration for tracking
-- Feature importance analysis
-- Model ensembling
-"""
-
 import pandas as pd
 import numpy as np
 import xgboost as xgb
@@ -571,6 +560,41 @@ def main():
     print(f"\n{'='*80}")
     print("✓ Ready for inference! Run: python 4_inference.py")
     print(f"{'='*80}\n")
+
+def run_training(train_features_path='train_features.csv', 
+                 n_folds=10, 
+                 n_trials=100, 
+                 random_state=42,
+                 use_gpu=True,
+                 gpu_id=0,
+                 n_jobs=17):
+    """
+    Train XGBoost models with hyperparameter optimization.
+    
+    Args:
+        train_features_path: Path to train_features.csv
+        n_folds: Number of cross-validation folds
+        n_trials: Optuna optimization trials
+        random_state: Random seed
+        use_gpu: Enable GPU acceleration
+        gpu_id: GPU device ID
+        n_jobs: CPU cores for parallel processing
+    """
+    # Update global configuration
+    global CONFIG
+    CONFIG = {
+        'n_folds': n_folds,
+        'test_size': 0.15,
+        'random_state': random_state,
+        'n_trials': n_trials,
+        'early_stopping_rounds': 100,
+        'gpu_id': gpu_id if use_gpu else -1,
+        'n_jobs': n_jobs,
+        'verbose_eval': 50
+    }
+    
+    # Run the main training function
+    main()
 
 if __name__ == "__main__":
     main()
