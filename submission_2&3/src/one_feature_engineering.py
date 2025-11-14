@@ -517,7 +517,7 @@ def extract_features(battle):
 # ============================================================================
 # MAIN PROCESSING
 # ============================================================================
-def main():
+def main(train_file):
     print("="*70)
     print("FEATURE ENGINEERING - TRAINING DATA ONLY")
     print(f"Using {N_JOBS} CPU cores")
@@ -529,7 +529,7 @@ def main():
     # Load training data
     print("\n[1/3] Loading training data...")
     train_data = []
-    train_file = 'dataset/train.jsonl'
+    #train_file = 'dataset/train.jsonl'
     
     with open(train_file, 'r') as f:
         for line in f:
@@ -573,4 +573,4 @@ def main():
     return train_df
 
 if __name__ == "__main__":
-    df = main()
+    df = main(train_file = 'dataset/train.jsonl')

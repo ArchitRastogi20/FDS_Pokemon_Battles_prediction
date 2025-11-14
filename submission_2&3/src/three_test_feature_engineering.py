@@ -505,11 +505,11 @@ def extract_features(battle):
 # ============================================================================
 # MAIN PROCESSING
 # ============================================================================
-def main():
+def main(test_file):
     print(f"\n[1/3] Loading test data...")
     
     test_data = []
-    test_file = 'dataset/test.jsonl'
+    #test_file = 'dataset/test.jsonl'
     
     try:
         with open(test_file, 'r') as f:
@@ -607,4 +607,4 @@ def main():
     return test_df
 
 if __name__ == "__main__":
-    df = main()
+    df = main(test_file='dataset/test.jsonl')
